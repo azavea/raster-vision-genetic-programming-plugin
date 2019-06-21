@@ -4,7 +4,7 @@ from os.path import join
 import rastervision as rv
 from examples.utils import str_to_bool, save_image_crop
 
-from fastai_plugin.semantic_segmentation_backend_config import (
+from genetic.semantic_segmentation_backend_config import (
     FASTAI_SEMANTIC_SEGMENTATION)
 
 

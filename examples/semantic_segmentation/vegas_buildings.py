@@ -7,8 +7,9 @@ import rastervision as rv
 from rastervision.utils.files import list_paths
 from examples.utils import str_to_bool
 
-from fastai_plugin.semantic_segmentation_backend_config import (
-    FASTAI_SEMANTIC_SEGMENTATION)
+from genetic.semantic_segmentation_backend_config import (
+    FASTAI_SEMANTIC_SEGMENTATION
+)
 
 
 class VegasBuildings(rv.ExperimentSet):
@@ -25,10 +26,14 @@ class VegasBuildings(rv.ExperimentSet):
                 debug output
         """
         base_uri = join(
-            raw_uri, 'SpaceNet_Buildings_Dataset_Round2/spacenetV2_Train/AOI_2_Vegas')
-        raster_uri = join(base_uri, 'RGB-PanSharpen')
+            raw_uri,
+            'AOI_2_Vegas_Train'
+        )
+        # base_uri = join(
+        #     raw_uri, 'SpaceNet_Buildings_Dataset_Round2/spacenetV2_Train/AOI_2_Vegas')
+        raster_uri = join(base_uri, 'MUL')
         label_uri = join(base_uri, 'geojson/buildings')
-        raster_fn_prefix = 'RGB-PanSharpen_AOI_2_Vegas_img'
+        raster_fn_prefix = 'MUL_AOI_2_Vegas_img'
         label_fn_prefix = 'buildings_AOI_2_Vegas_img'
         label_paths = list_paths(label_uri, ext='.geojson')
         label_re = re.compile(r'.*{}(\d+)\.geojson'.format(label_fn_prefix))
@@ -48,17 +53,15 @@ class VegasBuildings(rv.ExperimentSet):
 
         test = str_to_bool(test)
         exp_id = 'spacenet-simple-seg'
-        num_epochs = 5
-        batch_sz = 8
         debug = False
         chip_size = 300
-        if test:
-            exp_id += '-test'
-            num_epochs = 2
-            batch_sz = 1
-            debug = True
-            train_ids = ['12']
-            val_ids = ['13']
+        # if test:
+        #     exp_id += '-test'
+        #     num_epochs = 2
+        #     batch_sz = 1
+        #     debug = True
+        #     train_ids = ['12']
+        #     val_ids = ['13']
 
         task = rv.TaskConfig.builder(rv.SEMANTIC_SEGMENTATION) \
                             .with_chip_size(chip_size) \
@@ -75,10 +78,7 @@ class VegasBuildings(rv.ExperimentSet):
                             .build()
 
         config = {
-            'bs': batch_sz,
-            'num_epochs': num_epochs,
             'debug': debug,
-            'lr': 1e-4
         }
 
         backend = rv.BackendConfig.builder(FASTAI_SEMANTIC_SEGMENTATION) \

@@ -1,7 +1,12 @@
-FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu16.04
-ARG PYTHON_VERSION=3.6
+FROM ubuntu:16.04
 
-RUN apt-get update && apt-get install -y software-properties-common python-software-properties
+RUN apt-get update && apt-get install -y \
+	software-properties-common python-software-properties \
+	python3-pip
+
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+        apt-get update && \
+        apt-get install -y python3.7
 
 RUN add-apt-repository ppa:ubuntugis/ppa && \
     apt-get update && \
@@ -42,26 +47,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          libpng-dev && \
      rm -rf /var/lib/apt/list
 
-RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
-     chmod +x ~/miniconda.sh && \
-     ~/miniconda.sh -b -p /opt/conda && \
-     rm ~/miniconda.sh
-
-ENV PATH /opt/conda/bin:$PATH
-RUN conda install -y python=$PYTHON_VERSION
-RUN conda install -y -c pytorch magma-cuda100=2.5 torchvision=0.2
-RUN conda install -y -c fastai fastai=1.0.51
-RUN conda install -y -c conda-forge awscli=1.16.* boto3=1.9.*
-RUN conda install -y jupyter=1.0.*
-RUN conda clean -ya
-
-RUN pip install git+git://github.com/azavea/raster-vision.git@3b96214f9a4ce38e08ac78d0a0113353ad02ebf0
-RUN pip install ptvsd==4.2.*
+# RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
+#      chmod +x ~/miniconda.sh && \
+#      ~/miniconda.sh -b -p /opt/conda && \
+#      rm ~/miniconda.sh
+#
+# ENV PATH /opt/conda/bin:$PATH
+# RUN conda install -y python=$PYTHON_VERSION
+# RUN conda install -y -c pytorch magma-cuda100=2.5 torchvision=0.2
+# RUN conda install -y -c fastai fastai=1.0.51
+# RUN conda install -y -c conda-forge awscli=1.16.* boto3=1.9.*
+# RUN conda install -y jupyter=1.0.*
+# RUN conda clean -ya
+RUN pip3 install git+git://github.com/azavea/raster-vision.git@3b96214f9a4ce38e08ac78d0a0113353ad02ebf0
+RUN pip3 install deap==1.2.2 ptvsd==4.2.*
 
 # See https://github.com/mapbox/rasterio/issues/1289
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
-COPY ./fastai_plugin /opt/src/fastai_plugin
+COPY ./genetic /opt/src/genetic
 COPY ./examples /opt/src/examples
 
 ENV PYTHONPATH /opt/src/fastai:$PYTHONPATH

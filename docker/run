@@ -100,11 +100,10 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]
 then
     docker run ${RUNTIME} ${NAME} --rm -it \
         -v "${HOME}"/.rastervision:/root/.rastervision \
-        -v "${REPO_ROOT}"/fastai_plugin:/opt/src/fastai_plugin \
+        -v "${REPO_ROOT}"/genetic:/opt/src/genetic \
         -v "${REPO_ROOT}"/examples:/opt/src/examples \
         -v "${REPO_ROOT}"/scripts:/opt/src/scripts \
         -v ${RASTER_VISION_DATA_DIR}:/opt/data \
-        -v ${FASTAI_REPO}:/opt/src/fastai \
         -p 3000:3000 \
         ${TENSORBOARD} ${AWS} ${JUPYTER} ${DOCS} \
         ${RV_SRC_FLAGS} \

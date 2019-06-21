@@ -36,7 +36,7 @@ For debugging, it can be helpful to use a local copy of the Raster Vision source
 
 This assumes that a Batch stack was created using the [Raster Vision AWS Batch setup](https://github.com/azavea/raster-vision-aws).
 To use this plugin, you will need to add a job definition which points to a new tag on the ECR repo, and then publish the image to that tag.
-You can do this by editing [scripts/cpu_job_def.json](scripts/cpu_job_def.json), [scripts/gpu_job_def.json](scripts/gpu_job_def.json], and [docker/publish_image], and then running `docker/publish_image` outside the container, and `scripts/add_job_defs` inside the container.
+You can do this by editing [scripts/cpu_job_def.json](scripts/cpu_job_def.json), [scripts/gpu_job_def.json](scripts/gpu_job_def.json), and [docker/publish_image], and then running `docker/publish_image` outside the container, and `scripts/add_job_defs` inside the container.
 
 ### Setup profile
 
@@ -63,10 +63,10 @@ modules=["fastai_plugin.semantic_segmentation_backend_config"]
 To test the plugin, you can run an [experiment](examples/potsdam.py) using the ISPRS Potsdam dataset. Info on setting up the data and experiments in general can be found in the [examples repo](https://github.com/azavea/raster-vision-examples#isprs-potsdam-semantic-segmentation). A test run can be executed locally using something like the following. The `-p fastai` flag says to use the `fastai` profile created above.
 
 ```
-export RAW_URI="/opt/data/raw-data/isprs-potsdam"
-export PROCESSED_URI="/opt/data/fastai/potsdam/processed-data"
-export ROOT_URI="/opt/data/fastai/potsdam/local-output"
-rastervision -p fastai run local -e examples.semantic_segmentation.potsdam -m *exp_resnet50* \
+export RAW_URI="/opt/data/AOI_2_Vegas_Train"
+export PROCESSED_URI="/opt/data/genetic/vegas/processed-data"
+export ROOT_URI="/opt/data/genetic/vegas/local-output"
+rastervision -p plugin run local -e examples.semantic_segmentation.vegas_buildings \
     -a raw_uri $RAW_URI -a processed_uri $PROCESSED_URI -a root_uri $ROOT_URI \
     -a test True --splits 2
 ```
