@@ -63,12 +63,14 @@ modules=["fastai_plugin.semantic_segmentation_backend_config"]
 To test the plugin, you can run an [experiment](examples/potsdam.py) using the ISPRS Potsdam dataset. Info on setting up the data and experiments in general can be found in the [examples repo](https://github.com/azavea/raster-vision-examples#isprs-potsdam-semantic-segmentation). A test run can be executed locally using something like the following. The `-p fastai` flag says to use the `fastai` profile created above.
 
 ```
+export RASTER_VISION_REPO=/home/ddohler/Development/projects/gp_maml/raster-vision
+export RASTER_VISION_DATA_DIR=/home/ddohler/Development/projects/gp_maml/SpaceNet_Buildings_Competition_Round2_Sample
+```
+```
 export RAW_URI="/opt/data/AOI_2_Vegas_Train"
 export PROCESSED_URI="/opt/data/genetic/vegas/processed-data"
 export ROOT_URI="/opt/data/genetic/vegas/local-output"
-rastervision -p plugin run local -e examples.semantic_segmentation.vegas_buildings \
-    -a raw_uri $RAW_URI -a processed_uri $PROCESSED_URI -a root_uri $ROOT_URI \
-    -a test True --splits 2
+rastervision -p plugin run local -e examples.semantic_segmentation.vegas_buildings -a raw_uri $RAW_URI -a processed_uri $PROCESSED_URI -a root_uri $ROOT_URI -a test True --splits 2
 ```
 
 A full experiment can be run on AWS Batch using something like:

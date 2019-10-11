@@ -1,5 +1,5 @@
 from copy import deepcopy
-
+import math
 import rastervision as rv
 
 from genetic.semantic_segmentation_backend import (
@@ -11,15 +11,16 @@ GP_SEMANTIC_SEGMENTATION = 'GP_SEMANTIC_SEGMENTATION'
 
 
 class TrainOptions():
-    def __init__(self, num_generations=None, pop_size=None):
+    def __init__(self, num_generations=None, pop_size=None, band_count=None, debug=False):
         self.num_generations = num_generations
         self.pop_size = pop_size
+        self.band_count = band_count
+        self.debug = debug
 
-    # TODO: Probably don't need this unless it becomes a problem
-    # def __setattr__(self, name, value):
-    #     if name in ['batch_sz', 'num_epochs', 'sync_interval']:
-    #         value = int(value) if isinstance(value, float) else value
-    #     super().__setattr__(name, value)
+    def __setattr__(self, name, value):
+        if name in ['band_count', 'pop_size', 'num_generations']:
+            value = int(math.floor(value)) if isinstance(value, float) else value
+        super().__setattr__(name, value)
 
 
 class SemanticSegmentationBackendConfig(SimpleBackendConfig):
@@ -36,12 +37,16 @@ class SemanticSegmentationBackendConfigBuilder(SimpleBackendConfigBuilder):
 
     def with_train_options(
             self,
+            band_count=8,
             num_generations=100,
-            pop_size=25,):
+            pop_size=25,
+            debug=False,):
         b = deepcopy(self)
         b.train_opts = TrainOptions(
             num_generations=num_generations,
-            pop_size=pop_size)
+            pop_size=pop_size,
+            band_count=band_count,
+            debug=debug)
         return b
 
     def with_pretrained_uri(self, pretrained_uri):

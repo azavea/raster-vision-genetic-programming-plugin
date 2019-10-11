@@ -8,7 +8,7 @@ from rastervision.utils.files import list_paths
 from examples.utils import str_to_bool
 
 from genetic.semantic_segmentation_backend_config import (
-    FASTAI_SEMANTIC_SEGMENTATION
+    GP_SEMANTIC_SEGMENTATION
 )
 
 
@@ -25,14 +25,8 @@ class VegasBuildings(rv.ExperimentSet):
             test: (bool) if True, run a very small experiment as a test and generate
                 debug output
         """
-        base_uri = join(
-            raw_uri,
-            'AOI_2_Vegas_Train'
-        )
-        # base_uri = join(
-        #     raw_uri, 'SpaceNet_Buildings_Dataset_Round2/spacenetV2_Train/AOI_2_Vegas')
-        raster_uri = join(base_uri, 'MUL')
-        label_uri = join(base_uri, 'geojson/buildings')
+        raster_uri = join(raw_uri, 'MUL')
+        label_uri = join(raw_uri, 'geojson/buildings')
         raster_fn_prefix = 'MUL_AOI_2_Vegas_img'
         label_fn_prefix = 'buildings_AOI_2_Vegas_img'
         label_paths = list_paths(label_uri, ext='.geojson')
@@ -53,15 +47,7 @@ class VegasBuildings(rv.ExperimentSet):
 
         test = str_to_bool(test)
         exp_id = 'spacenet-simple-seg'
-        debug = False
-        chip_size = 300
-        # if test:
-        #     exp_id += '-test'
-        #     num_epochs = 2
-        #     batch_sz = 1
-        #     debug = True
-        #     train_ids = ['12']
-        #     val_ids = ['13']
+        chip_size = 162
 
         task = rv.TaskConfig.builder(rv.SEMANTIC_SEGMENTATION) \
                             .with_chip_size(chip_size) \
@@ -69,21 +55,24 @@ class VegasBuildings(rv.ExperimentSet):
                                 'Building': (1, 'orange'),
                                 'Background': (2, 'black')
                             }) \
-                            .with_chip_options(
-                                chips_per_scene=9,
-                                debug_chip_probability=0.25,
-                                negative_survival_probability=1.0,
-                                target_classes=[1],
-                                target_count_threshold=1000) \
-                            .build()
+            .with_chip_options(
+                chips_per_scene=1,
+                debug_chip_probability=0.25,
+                negative_survival_probability=1.0,
+                target_classes=[1],
+                target_count_threshold=1000) \
+            .build()
 
         config = {
-            'debug': debug,
+            'band_count': 8,
+            'num_generations': 3,
+            'pop_size': 50,
+            'debug': True
         }
 
-        backend = rv.BackendConfig.builder(FASTAI_SEMANTIC_SEGMENTATION) \
+        backend = rv.BackendConfig.builder(GP_SEMANTIC_SEGMENTATION) \
                                   .with_task(task) \
-                                  .with_config(config) \
+                                  .with_train_options(**config) \
                                   .build()
 
         def make_scene(id):
@@ -92,7 +81,6 @@ class VegasBuildings(rv.ExperimentSet):
 
             raster_source = rv.RasterSourceConfig.builder(rv.RASTERIO_SOURCE) \
                 .with_uri(train_image_uri) \
-                .with_channel_order([0, 1, 2]) \
                 .with_stats_transformer() \
                 .build()
 

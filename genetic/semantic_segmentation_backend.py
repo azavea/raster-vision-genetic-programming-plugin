@@ -1,10 +1,10 @@
 import os
-import sys
 import operator
 from os.path import join, basename, dirname
 import uuid
 import zipfile
 import glob
+import multiprocessing
 from pathlib import Path
 import random
 import math
@@ -13,6 +13,8 @@ from functools import partial
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+
+import rasterio
 
 from rastervision.utils.files import (
     get_local_path, make_dir, upload_or_copy, list_paths,
@@ -27,11 +29,10 @@ from deap import base
 from deap import creator
 from deap import tools
 from deap import gp
-from genetic.utils import zipdir
-
-matplotlib.use("Agg")
+from genetic.utils import zipdir, apply_to_raster, fitness
 
 
+# DEAP infrastructure setup
 # Define new functions
 def protectedDiv(left, right):
     if right == 0:
@@ -59,6 +60,13 @@ def lt(left, right):
     if left < right:
         return 1
     return 0
+
+
+creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
+
+# This has to go last, otherwise the above items won't be found when pickling.
+pool = multiprocessing.Pool()
 
 
 # Creates a representation of the input and the labels overlaid, it's RGB + input labels, labels
@@ -104,11 +112,55 @@ class SemanticSegmentationBackend(Backend):
         self.task_config = task_config
         self.backend_opts = backend_opts
         self.train_opts = train_opts
-        # ? What's this?
-        # This is set by load_model.
-        # Four methods to override: Two for making chips, train, load_model, predict.
-        self.inf_learner = None
+        self.raster_func = None
+        self._pset = gp.PrimitiveSet("MAIN", self.train_opts.band_count)
+        self.chip_dir = None
 
+        # Set up toolbox with evolution configuration.
+        # TODO: Is this the best place to configure this? Can we auto-detect?
+        self._pset = gp.PrimitiveSet("MAIN", self.train_opts.band_count)
+        # TODO: Make these configurable (?)
+        self._pset.addPrimitive(operator.add, 2)
+        self._pset.addPrimitive(operator.sub, 2)
+        self._pset.addPrimitive(operator.mul, 2)
+        self._pset.addPrimitive(protectedDiv, 2)
+        self._pset.addPrimitive(operator.neg, 1)
+        self._pset.addPrimitive(math.cos, 1)
+        self._pset.addPrimitive(math.sin, 1)
+        self._pset.addPrimitive(protectedLog10, 1)
+        self._pset.addPrimitive(protectedSqrt, 1)
+        self._pset.addPrimitive(math.floor, 1)
+        self._pset.addPrimitive(math.ceil, 1)
+        self._pset.addPrimitive(round, 1)
+
+        #self._pset.addEphemeralConstant("rand101", lambda: random.randint(0, 65535))
+
+        # Multiprocessing
+        self._toolbox = base.Toolbox()
+
+        self._toolbox.register("map", pool.map)
+        # TODO: Make these configurable.
+        self._toolbox.register("expr", gp.genHalfAndHalf, pset=self._pset, min_=1, max_=2)
+        self._toolbox.register("individual", tools.initIterate,
+                               creator.Individual, self._toolbox.expr)
+        self._toolbox.register("population", tools.initRepeat, list, self._toolbox.individual)
+        self._toolbox.register("compile", gp.compile, pset=self._pset)
+
+        self._toolbox.register("select", tools.selTournament, tournsize=3)
+        self._toolbox.register("mate", gp.cxOnePoint)
+        self._toolbox.register("expr_mut", gp.genFull, min_=0, max_=2)
+        self._toolbox.register("mutate", self.mut_random_operator)
+
+        self._toolbox.decorate(
+            "mate",
+            gp.staticLimit(key=operator.attrgetter("height"), max_value=5)
+        )
+        self._toolbox.decorate(
+            "mutate",
+            gp.staticLimit(key=operator.attrgetter("height"), max_value=5)
+        )
+
+    # Four methods to override: Two for making chips, train, load_model, predict.
     def print_options(self):
         # TODO get logging to work for plugins
         print('Backend options')
@@ -122,6 +174,19 @@ class SemanticSegmentationBackend(Backend):
         for k, v in self.train_opts.__dict__.items():
             print('{}: {}'.format(k, v))
         print()
+
+    def save_tiff(self, pixels, path):
+        """Use rasterio to write data to a file at path."""
+        with rasterio.open(
+            path,
+            'w',
+            driver='GTiff',
+            width=pixels.shape[0],
+            height=pixels.shape[1],
+            count=pixels.shape[2],
+            dtype=str(pixels.dtype)
+        ) as ds:
+            ds.write(np.transpose(pixels, (2, 0, 1)))
 
     def process_scene_data(self, scene, data, tmp_dir):
         """Process each scene's training data.
@@ -160,12 +225,12 @@ class SemanticSegmentationBackend(Backend):
         # scene.
         # Labels has more than just the window, but chip and window should be aligned.
         for ind, (chip, window, labels) in enumerate(data):
-            chip_path = join(img_dir, '{}-{}.png'.format(scene.id, ind))
-            label_path = join(labels_dir, '{}-{}.png'.format(scene.id, ind))
+            chip_path = join(img_dir, '{}-{}.tif'.format(scene.id, ind))
+            label_path = join(labels_dir, '{}-{}.tif'.format(scene.id, ind))
 
             label_im = labels.get_label_arr(window).astype(np.uint8)
             save_img(label_im, label_path)
-            save_img(chip, chip_path)
+            self.save_tiff(chip, chip_path)
 
         return scene_dir
 
@@ -204,7 +269,7 @@ class SemanticSegmentationBackend(Backend):
         with zipfile.ZipFile(group_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             def _write_zip(results, split):
                 for scene_dir in results:
-                    scene_paths = glob.glob(join(scene_dir, '**/*.png'))
+                    scene_paths = glob.glob(join(scene_dir, '**/*.tif'))
                     for p in scene_paths:
                         zipf.write(p, join(
                             '{}-{}'.format(
@@ -276,48 +341,6 @@ class SemanticSegmentationBackend(Backend):
 
         return d
 
-    def fitness(self, individual):
-        """
-        Return a score representing the fitness of a particular program.
-
-        Params individual: The individual to be evaluated.  train_files: A list of tuples of the
-        form (raster, geojson), where raster is a filename of a GeoTIFF containing multiband raster
-        data, and geojson is the name of a GeoJSON file representing ground-truth.
-        """
-        # Take a random choice from the possible train data to test against for this iteration We
-        # need to get at least some mixture of classes in order to train. A good, dense image has
-        # about 50 buildings (houses), so add images to the evaluation set until we have 50
-        # buildings.
-        # TODO: Disabled for now, we may not need to do this.
-        # eval_choices = assemble_eval_data(train_files, desired_features=100)
-        # TODO -- This needs to get read in, train() is responsible for getting stuff in the right
-        # place.
-        eval_data = []
-
-        total_error = 0
-        func = self._toolbox.compile(expr=individual)
-        for input_file, truth_file in eval_data:
-            # Load truth data
-            with open(truth_file, 'r') as truth:
-                truth_pixels = np.load(truth)
-            with open(input_file, 'r') as img:
-                img_pixels = np.load(img)
-
-            try:
-                output = self.apply_to_raster(func, img_pixels, truth_pixels.shape)
-            except (ValueError, OverflowError):
-                print(individual)
-                return (sys.float_info.max,)
-            #print('output', output[0, 0], output[50, 50])
-            #print('truth', truth_pixels[0, 0], truth_pixels[50, 50])
-            errors = output - truth_pixels
-            # Return sum of squared classification errors
-            #total_error += np.sum(np.square(errors))
-            # Return mean squared error
-            total_error += np.mean(np.square(errors))
-            #print(individual.__str__(), total_error)
-        return (total_error,)
-
     # ? What state of the world does this rely on? What can it assume exists? What should it return?
     # ? What should this return?
     # Basically, all this relies on is that process_sceneset_data has been run on all groups of
@@ -336,14 +359,19 @@ class SemanticSegmentationBackend(Backend):
         sync_from_dir(train_uri, train_dir)
 
         # Get zip file for each group, and unzip them into chip_dir.
-        chip_dir = join(tmp_dir, 'chips')
-        make_dir(chip_dir)
+        self.chip_dir = join(tmp_dir, 'chips')
+        make_dir(self.chip_dir)
+
+        train_chip_dir = self.chip_dir + '/train-img'
+        train_truth_dir = self.chip_dir + '/train-labels'
+        fitness_func = partial(fitness, train_chip_dir, train_truth_dir, self._toolbox.compile)
+        self._toolbox.register("evaluate", fitness_func)
         # This is the key part -- this is how it knows where to get the chips from.
         # backend_opts comes from RV, and train_opts is where you can define backend-specific stuff.
         for zip_uri in list_paths(self.backend_opts.chip_uri, 'zip'):
             zip_path = download_if_needed(zip_uri, tmp_dir)
             with zipfile.ZipFile(zip_path, 'r') as zipf:
-                zipf.extractall(chip_dir)
+                zipf.extractall(self.chip_dir)
 
         # Setup data loader.
         def get_label_path(im_path):
@@ -354,7 +382,6 @@ class SemanticSegmentationBackend(Backend):
         classes = class_map.get_class_names()
         if 0 not in class_map.get_keys():
             classes = ['nodata'] + classes
-
         # Disabling this for now.
         # train_img_dir = self.subset_training_data(chip_dir)
 
@@ -376,48 +403,6 @@ class SemanticSegmentationBackend(Backend):
         #     pretrained_path = download_if_needed(pretrained_uri, tmp_dir)
 
         # Evolve
-        # Set up toolbox with evolution configuration.
-        # TODO: Is this the best place to configure this? Can we auto-detect?
-        self._pset = gp.PrimitiveSet("MAIN", self.train_opts.band_count)
-        # TODO: Make these configurable (?)
-        self._pset.addPrimitive(operator.add, 2)
-        self._pset.addPrimitive(operator.sub, 2)
-        self._pset.addPrimitive(operator.mul, 2)
-        self._pset.addPrimitive(protectedDiv, 2)
-        self._pset.addPrimitive(operator.neg, 1)
-        self._pset.addPrimitive(math.cos, 1)
-        self._pset.addPrimitive(math.sin, 1)
-        self._pset.addPrimitive(protectedLog10, 1)
-        self._pset.addPrimitive(protectedSqrt, 1)
-
-        self._pset.addEphemeralConstant("rand101", lambda: random.randint(0, 65535))
-
-        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-        creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
-
-        self._toolbox = base.Toolbox()
-        # TODO: Make these configurable.
-        self._toolbox.register("expr", gp.genHalfAndHalf, pset=self._pset, min_=1, max_=2)
-        self._toolbox.register("individual", tools.initIterate,
-                               creator.Individual, self._toolbox.expr)
-        self._toolbox.register("population", tools.initRepeat, list, self._toolbox.individual)
-        self._toolbox.register("compile", gp.compile, pset=self._pset)
-
-        # TODO: Connect with process_sceneset
-        self._toolbox.register("evaluate", self.fitness)
-        self._toolbox.register("select", tools.selTournament, tournsize=3)
-        self._toolbox.register("mate", gp.cxOnePoint)
-        self._toolbox.register("expr_mut", gp.genFull, min_=0, max_=2)
-        self._toolbox.register("mutate", self.mut_random_operator)
-
-        self._toolbox.decorate(
-            "mate",
-            gp.staticLimit(key=operator.attrgetter("height"), max_value=5)
-        )
-        self._toolbox.decorate(
-            "mutate",
-            gp.staticLimit(key=operator.attrgetter("height"), max_value=5)
-        )
 
         # Set up hall of fame to track the best individual
         hof = tools.HallOfFame(1)
@@ -441,7 +426,7 @@ class SemanticSegmentationBackend(Backend):
             self.train_opts.pop_size,  # TODO: Add parameter for new individual count (I think?)
             0.5,  # TODO: Add parameter for mutation rate (?)
             0.4,  # TODO: Add param for crossover rate (?)
-            30,  # TODO: Add param for this, I don't remember what it is
+            self.train_opts.num_generations,
             stats=mstats,  # TODO: Make sure the non-debug case works
             halloffame=hof,
             verbose=self.train_opts.debug
@@ -455,13 +440,13 @@ class SemanticSegmentationBackend(Backend):
         # Since model is exported every epoch, we need some other way to
         # show that training is finished.
         # TODO: I'm doing both but I'd rather not used train_done_uri if I don't have to.
-        str_to_file(hof[0], self.backend_opts.train_done_uri)
-        str_to_file(hof[0], self.backend_opts.train_uri)
+        print(str(hof[0]))
+        str_to_file(str(hof[0]), self.backend_opts.train_done_uri)
+        str_to_file(str(hof[0]), self.backend_opts.model_uri)
 
         # Sync output to cloud.
         sync_to_dir(train_dir, self.backend_opts.train_uri)
 
-    # DONE
     def mut_random_operator(self, individual):
         """Randomly select a mutation operator and apply it."""
         mutations = [
@@ -474,16 +459,8 @@ class SemanticSegmentationBackend(Backend):
         operator = random.choice(mutations)
         return operator()
 
-    # TODO: sync up with process_sceneset_results() and train()
-    def apply_to_raster(self, func, input_pix, shape):
-        input_pixels = input_pix.T.astype('float64')
-        output = np.apply_along_axis(lambda arr: func(*arr),
-                                     2, input_pixels).reshape(shape)
-        return output
-
     # Takes in a text file containing a Python expression and compiles it to Python code.
     # Compiled function stored as self.raster_func.
-    # DONE
     def load_model(self, tmp_dir):
         """Load the model in preparation for one or more prediction calls."""
         if self.raster_func is None:
@@ -491,7 +468,10 @@ class SemanticSegmentationBackend(Backend):
             model_uri = self.backend_opts.model_uri
             model_path = download_if_needed(model_uri, tmp_dir)
             with open(model_path, 'r') as func_file:
-                self.raster_func = gp.compile(func_file.read())
+                func_str = func_file.read()
+                print('FUNC', func_str)
+                parsed_func = self._toolbox.compile(expr=func_str)
+                self.raster_func = parsed_func
 
     def predict(self, chips, windows, tmp_dir):
         """Return predictions for a chip using model.
@@ -509,8 +489,15 @@ class SemanticSegmentationBackend(Backend):
         # be included during training. They need to be integers. So I need to do the snapping here
         # (and it should happen in the training too, in the same way).
         self.load_model(tmp_dir)
-        # TODO: Make sure this passes in the right shape
-        label_arr = [self.apply_to_raster(self.raster_func, chips[0], chips[0].shape)]
+        func_chips = [np.transpose(chip, (2, 0, 1)) for chip in chips]
+        print('SHAPE OF CHIPS IS:', func_chips[0].shape)
+        # The expected output shape is only one band with the same length and width dimensions
+        label_arr = apply_to_raster(
+            self.raster_func,
+            func_chips[0],
+            (chips[0].shape[0], chips[0].shape[1])
+        )
+        print(label_arr.shape, label_arr.dtype, str(label_arr))
 
         # Return "trivial" instance of SemanticSegmentationLabels that holds a single
         # window and has ability to get labels for that one window.
