@@ -323,6 +323,7 @@ class SemanticSegmentationBackend(Backend):
         if self.train_opts.debug:
             print(str(hof[0]))
         str_to_file(str(hof[0]), self.backend_opts.train_done_uri)
+        str_to_file(str(hof[0]), self.backend_opts.model_uri)
 
         # Sync output to cloud.
         sync_to_dir(train_dir, self.backend_opts.train_uri)
