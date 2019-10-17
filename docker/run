@@ -1,11 +1,10 @@
 #!/bin/bash
 
 # This is the same as the main repo `run` script except that it:
-# * mounts the fastai_plugin directory
-# * uses the -fastai Docker image
+# * mounts the genetic directory
+# * uses the genetic Docker image
 # * mounts the main RV repo only if it's pointed to by RASTER_VISION_REPO
 # * removes the --docs option
-# * uses $REPO_ROOT/notebooks as the notebooks dir
 
 set -e
 
@@ -21,7 +20,7 @@ REPO_ROOT="$( cd -P "$( dirname "$DOCKER_DIR" )" && pwd )"
 function usage() {
     echo -n \
          "Usage: $(basename "$0") <options> <command>
-Run a console in the raster-vision-fastai Docker image locally.
+Run a console in the raster-vision-genetic Docker image locally.
 
 Environment variables:
 RASTER_VISION_DATA_DIR (directory for storing data; mounted to /opt/data)
@@ -30,16 +29,13 @@ RASTER_VISION_REPO (optional path to main RV repo; mounted to /opt/src)
 
 Options:
 --aws forwards AWS credentials (sets AWS_PROFILE env var and mounts ~/.aws to /root/.aws)
---tensorboard maps port 6006
---gpu use the NVIDIA runtime and GPU image
 --name sets the name of the running container
---jupyter forwards port 8888, mounts ./notebooks to /opt/notebooks, and runs Jupyter
 
 All arguments after above options are passed to 'docker run'.
 "
 }
 
-IMAGE="raster-vision-fastai"
+IMAGE="raster-vision-genetic"
 RASTER_VISION_DATA_DIR="${RASTER_VISION_DATA_DIR:-${REPO_ROOT}/data}"
 
 # Parse options using scheme in
@@ -58,22 +54,9 @@ do
         AWS="-e AWS_PROFILE=${AWS_PROFILE:-default} -v ${HOME}/.aws:/root/.aws:ro"
         shift # past argument
         ;;
-        --tensorboard)
-        TENSORBOARD="-p 6006:6006"
-        shift # past argument
-        ;;
-        --gpu)
-        RUNTIME="--runtime=nvidia"
-        shift # past argument
-        ;;
         --name)
         shift
         NAME="--name $1"
-        shift
-        ;;
-        --jupyter)
-        JUPYTER="-p 8888:8888"
-        CMD=(jupyter notebook --ip 0.0.0.0 --port 8888 --no-browser --allow-root --notebook-dir=/opt/src)
         shift
         ;;
         *) # unknown option
@@ -102,9 +85,8 @@ then
         -v "${HOME}"/.rastervision:/root/.rastervision \
         -v "${REPO_ROOT}"/genetic:/opt/src/genetic \
         -v "${REPO_ROOT}"/examples:/opt/src/examples \
-        -v "${REPO_ROOT}"/scripts:/opt/src/scripts \
         -v ${RASTER_VISION_DATA_DIR}:/opt/data \
-        ${TENSORBOARD} ${AWS} ${JUPYTER} ${DOCS} \
+        ${DOCS} \
         ${RV_SRC_FLAGS} \
         ${IMAGE} "${CMD[@]}"
 fi

@@ -21,5 +21,5 @@ then
         exit
     fi
 
-    docker build -t raster-vision-fastai -f Dockerfile .
+    docker build -t raster-vision-genetic -f Dockerfile .
 fi

@@ -5,7 +5,6 @@ from os.path import join
 
 import rastervision as rv
 from rastervision.utils.files import list_paths
-from examples.utils import str_to_bool
 
 from genetic.semantic_segmentation_backend_config import (
     GP_SEMANTIC_SEGMENTATION
@@ -13,7 +12,7 @@ from genetic.semantic_segmentation_backend_config import (
 
 
 class VegasBuildings(rv.ExperimentSet):
-    def exp_main(self, raw_uri, root_uri, test=False):
+    def exp_main(self, raw_uri, root_uri):
         """Run an experiment on the Spacenet Vegas building dataset.
 
         This is a simple example of how to do semantic segmentation on data that
@@ -22,8 +21,6 @@ class VegasBuildings(rv.ExperimentSet):
         Args:
             raw_uri: (str) directory of raw data (the root of the Spacenet dataset)
             root_uri: (str) root directory for experiment output
-            test: (bool) if True, run a very small experiment as a test and generate
-                debug output
         """
         raster_uri = join(raw_uri, 'MUL')
         label_uri = join(raw_uri, 'geojson/buildings')
@@ -45,7 +42,6 @@ class VegasBuildings(rv.ExperimentSet):
         train_ids = scene_ids[0:num_train_ids]
         val_ids = scene_ids[num_train_ids:]
 
-        test = str_to_bool(test)
         exp_id = 'spacenet-simple-seg'
         chip_size = 162
 
@@ -65,8 +61,12 @@ class VegasBuildings(rv.ExperimentSet):
 
         config = {
             'band_count': 8,
-            'num_generations': 3,
-            'pop_size': 50,
+            'num_generations': 50,
+            'pop_size': 250,
+            'num_individuals': 125,
+            'num_offspring': 125,
+            'mutation_rate': 0.3,
+            'crossover_rate': 0.5,
             'debug': True
         }
 

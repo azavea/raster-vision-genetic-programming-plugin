@@ -1,8 +1,8 @@
+import functools
 import numpy as np
 import os
 from os.path import join
 import rasterio
-import sys
 import zipfile
 
 from rastervision.utils.files import list_paths
@@ -24,6 +24,16 @@ def apply_to_raster(func, input_pix, shape):
     return output
 
 
+@functools.lru_cache(None)
+def read_input_truth(input_file, truth_file):
+    with rasterio.open(input_file, 'r') as input_ds:
+        with rasterio.open(truth_file, 'r') as truth_ds:
+            input_pixels = input_ds.read()
+            truth_pixels = truth_ds.read()
+
+            return (input_pixels, truth_pixels)
+
+
 def fitness(data_img_dir, truth_img_dir, compiler, individual):
     """
     Return a score representing the fitness of a particular program.
@@ -40,15 +50,8 @@ def fitness(data_img_dir, truth_img_dir, compiler, individual):
     func = compiler(expr=individual)
     for input_file, truth_file in eval_data:
         # Load truth data
-        with rasterio.open(input_file, 'r') as input_ds:
-            with rasterio.open(truth_file, 'r') as truth_ds:
-                input_pixels = input_ds.read()
-                truth_pixels = truth_ds.read()
-                try:
-                    output = apply_to_raster(func, input_pixels, truth_pixels.shape)
-                except (ValueError, OverflowError):
-                    print(individual)
-                    return (sys.float_info.max,)
+        input_pixels, truth_pixels = read_input_truth(input_file, truth_file)
+        output = apply_to_raster(func, input_pixels, truth_pixels.shape)
         errors = output - truth_pixels
         #total_error += np.sum(np.square(errors))
         # Return mean squared error

@@ -7,7 +7,6 @@ from google.protobuf import struct_pb2
 import rastervision as rv
 from rastervision.backend import (BackendConfig, BackendConfigBuilder)
 from rastervision.protos.backend_pb2 import BackendConfig as BackendConfigMsg
-from rastervision.task import SemanticSegmentationConfig
 
 
 class BackendOptions():

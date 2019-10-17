@@ -11,14 +11,32 @@ GP_SEMANTIC_SEGMENTATION = 'GP_SEMANTIC_SEGMENTATION'
 
 
 class TrainOptions():
-    def __init__(self, num_generations=None, pop_size=None, band_count=None, debug=False):
+    def __init__(
+            self,
+            num_generations=25,
+            pop_size=50,
+            band_count=8,
+            num_individuals=25,
+            num_offspring=25,
+            mutation_rate=.3,
+            crossover_rate=.3,
+            debug=False):
         self.num_generations = num_generations
         self.pop_size = pop_size
         self.band_count = band_count
+        self.num_individuals = num_individuals
+        self.num_offspring = num_offspring
+        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
         self.debug = debug
 
     def __setattr__(self, name, value):
-        if name in ['band_count', 'pop_size', 'num_generations']:
+        if name in [
+                'band_count',
+                'pop_size',
+                'num_generations',
+                'num_offspring',
+                'num_individuals']:
             value = int(math.floor(value)) if isinstance(value, float) else value
         super().__setattr__(name, value)
 
@@ -35,18 +53,9 @@ class SemanticSegmentationBackendConfigBuilder(SimpleBackendConfigBuilder):
     def _applicable_tasks(self):
         return [rv.SEMANTIC_SEGMENTATION]
 
-    def with_train_options(
-            self,
-            band_count=8,
-            num_generations=100,
-            pop_size=25,
-            debug=False,):
+    def with_train_options(self, **kwargs):
         b = deepcopy(self)
-        b.train_opts = TrainOptions(
-            num_generations=num_generations,
-            pop_size=pop_size,
-            band_count=band_count,
-            debug=debug)
+        b.train_opts = TrainOptions(**kwargs)
         return b
 
     def with_pretrained_uri(self, pretrained_uri):
@@ -55,7 +64,6 @@ class SemanticSegmentationBackendConfigBuilder(SimpleBackendConfigBuilder):
         return super().with_pretrained_uri(pretrained_uri)
 
 
-# ? Need to change names here.
 def register_plugin(plugin_registry):
     plugin_registry.register_config_builder(
         rv.BACKEND, GP_SEMANTIC_SEGMENTATION,

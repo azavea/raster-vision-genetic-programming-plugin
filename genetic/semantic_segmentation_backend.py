@@ -1,4 +1,3 @@
-import os
 import operator
 from os.path import join, basename, dirname
 import uuid
@@ -10,8 +9,6 @@ import random
 import math
 from functools import partial
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 
 import rasterio
@@ -22,14 +19,13 @@ from rastervision.utils.files import (
 from rastervision.utils.misc import save_img
 from rastervision.backend import Backend
 from rastervision.data.label import SemanticSegmentationLabels
-from rastervision.data.label_source.utils import color_to_triple
 
 from deap import algorithms
 from deap import base
 from deap import creator
 from deap import tools
 from deap import gp
-from genetic.utils import zipdir, apply_to_raster, fitness
+from genetic.utils import apply_to_raster, fitness
 
 
 # DEAP infrastructure setup
@@ -69,44 +65,6 @@ creator.create("Individual", gp.PrimitiveTree, fitness=creator.FitnessMin)
 pool = multiprocessing.Pool()
 
 
-# Creates a representation of the input and the labels overlaid, it's RGB + input labels, labels
-# colorized based on color map.
-def make_debug_chips(data, class_map, tmp_dir, train_uri, debug_prob=1.0):
-    # TODO get rid of white frame
-    if 0 in class_map.get_keys():
-        colors = [class_map.get_by_id(i).color
-                  for i in range(len(class_map))]
-    else:
-        colors = [class_map.get_by_id(i).color
-                  for i in range(1, len(class_map) + 1)]
-        # use grey for nodata
-        colors = ['grey'] + colors
-    colors = [color_to_triple(c) for c in colors]
-    colors = [tuple([x / 255 for x in c]) for c in colors]
-    cmap = matplotlib.colors.ListedColormap(colors)
-
-    def _make_debug_chips(split):
-        debug_chips_dir = join(tmp_dir, '{}-debug-chips'.format(split))
-        zip_path = join(tmp_dir, '{}-debug-chips.zip'.format(split))
-        zip_uri = join(train_uri, '{}-debug-chips.zip'.format(split))
-        make_dir(debug_chips_dir)
-        ds = data.train_ds if split == 'train' else data.valid_ds
-        for i, (x, y) in enumerate(ds):
-            if random.uniform(0, 1) < debug_prob:
-                plt.axis('off')
-                plt.imshow(x.data.permute((1, 2, 0)).numpy())
-                plt.imshow(y.data.squeeze().numpy(), alpha=0.4, vmin=0,
-                           vmax=len(colors), cmap=cmap)
-                plt.savefig(join(debug_chips_dir, '{}.png'.format(i)),
-                            figsize=(3, 3))
-                plt.close()
-        zipdir(debug_chips_dir, zip_path)
-        upload_or_copy(zip_path, zip_uri)
-
-    _make_debug_chips('train')
-    _make_debug_chips('val')
-
-
 class SemanticSegmentationBackend(Backend):
     def __init__(self, task_config, backend_opts, train_opts):
         self.task_config = task_config
@@ -132,8 +90,6 @@ class SemanticSegmentationBackend(Backend):
         self._pset.addPrimitive(math.floor, 1)
         self._pset.addPrimitive(math.ceil, 1)
         self._pset.addPrimitive(round, 1)
-
-        #self._pset.addEphemeralConstant("rand101", lambda: random.randint(0, 65535))
 
         # Multiprocessing
         self._toolbox = base.Toolbox()
@@ -162,7 +118,6 @@ class SemanticSegmentationBackend(Backend):
 
     # Four methods to override: Two for making chips, train, load_model, predict.
     def print_options(self):
-        # TODO get logging to work for plugins
         print('Backend options')
         print('--------------')
         for k, v in self.backend_opts.__dict__.items():
@@ -177,6 +132,11 @@ class SemanticSegmentationBackend(Backend):
 
     def save_tiff(self, pixels, path):
         """Use rasterio to write data to a file at path."""
+        # TODO: The transform parameter is just to get rasterio to stop complaining that the dataset
+        # is unreferenced. Ideally, we should be using something else to do reading and writing
+        # since none of the images have georeferencing information. However, I've found indications
+        # that other libraries don't do well with non-RGB image files so I've stuck with rasterio
+        # for now.
         with rasterio.open(
             path,
             'w',
@@ -184,7 +144,8 @@ class SemanticSegmentationBackend(Backend):
             width=pixels.shape[0],
             height=pixels.shape[1],
             count=pixels.shape[2],
-            dtype=str(pixels.dtype)
+            dtype=str(pixels.dtype),
+            transform=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
         ) as ds:
             ds.write(np.transpose(pixels, (2, 0, 1)))
 
@@ -259,7 +220,8 @@ class SemanticSegmentationBackend(Backend):
         # ? Overall, what's the role of this function in the pipeline?
         # ? Can you give examples of what training_results and validation_results might look like?
         # Does this mean rasters or vectors or accuracy metrics? What calls this?
-        self.print_options()
+        if self.train_opts.debug:
+            self.print_options()
 
         group = str(uuid.uuid4())
         group_uri = join(self.backend_opts.chip_uri, '{}.zip'.format(group))
@@ -280,66 +242,6 @@ class SemanticSegmentationBackend(Backend):
             _write_zip(validation_results, 'val')
 
         upload_or_copy(group_path, group_uri)
-
-    # Currently disabled but might be useful later.
-    def subset_training_data(self, chip_dir):
-        """ Specify a subset of all the training chips that have been created
-
-        This creates uses the train_opts 'train_count' or 'train_prop' parameter to
-            subset a number (n) of the training chips. The function prioritizes
-            'train_count' and falls back to 'train_prop' if 'train_count' is not set.
-            It creates two new directories 'train-{n}-img' and 'train-{n}-labels' with
-            subsets of the chips that the dataloader can read from.
-
-        Args:
-            chip_dir (str): path to the chip directory
-
-        Returns:
-            (str) name of the train subset image directory (e.g. 'train-{n}-img')
-        """
-        # Allows you to choose a subset of the training chips to actually get used.
-        # This is called by the train method, this isn't RV-specific.
-        # ? Overall, what's the role of this function in the pipeline?
-        # ? What's the dataloader here? Do I need to modify that?
-
-        all_train_uri = join(chip_dir, 'train-img')
-        all_train = list(filter(lambda x: x.endswith(
-            '.png'), os.listdir(all_train_uri)))
-        all_train.sort()
-
-        count = self.train_opts.train_count
-        if count:
-            if count > len(all_train):
-                raise Exception('Value for "train_count" ({}) must be less '
-                                'than or equal to the total number of chips ({}) '
-                                'in the train set.'.format(count, len(all_train)))
-            sample_size = int(count)
-        else:
-            prop = self.train_opts.train_prop
-            if prop > 1 or prop < 0:
-                raise Exception(
-                    'Value for "train_prop" must be between 0 and 1, got {}.'.format(prop)
-                )
-            if prop == 1:
-                return 'train-img'
-            sample_size = round(prop * len(all_train))
-
-        random.seed(100)
-        sample_images = random.sample(all_train, sample_size)
-
-        def _copy_train_chips(img_or_labels):
-            all_uri = join(chip_dir, 'train-{}'.format(img_or_labels))
-            sample_dir = 'train-{}-{}'.format(str(sample_size), img_or_labels)
-            sample_dir_uri = join(chip_dir, sample_dir)
-            make_dir(sample_dir_uri)
-            for s in sample_images:
-                upload_or_copy(join(all_uri, s), join(sample_dir_uri, s))
-            return sample_dir
-
-        for i in ('labels', 'img'):
-            d = _copy_train_chips(i)
-
-        return d
 
     # ? What state of the world does this rely on? What can it assume exists? What should it return?
     # ? What should this return?
@@ -377,33 +279,12 @@ class SemanticSegmentationBackend(Backend):
         def get_label_path(im_path):
             return Path(str(im_path.parent)[:-4] + '-labels') / im_path.name
 
-        # size = self.task_config.chip_size
         class_map = self.task_config.class_map
         classes = class_map.get_class_names()
         if 0 not in class_map.get_keys():
             classes = ['nodata'] + classes
-        # Disabling this for now.
-        # train_img_dir = self.subset_training_data(chip_dir)
-
-        # Disabling for now
-        # data = None  # TODO
-        # print(data)
-        #
-        # if self.train_opts.debug:
-        #     make_debug_chips(data, class_map, tmp_dir, train_uri)
-
-        # Setup GP.
-        # TODO: Use the "pretrained_uri" to seed the population.
-        # https://deap.readthedocs.io/en/master/tutorials/basic/part1.html
-        # Disabling this for now.
-        # pretrained_uri = self.backend_opts.pretrained_uri
-        # if pretrained_uri:
-        #     print('Loading weights from pretrained_uri: {}'.format(
-        #         pretrained_uri))
-        #     pretrained_path = download_if_needed(pretrained_uri, tmp_dir)
 
         # Evolve
-
         # Set up hall of fame to track the best individual
         hof = tools.HallOfFame(1)
 
@@ -422,12 +303,12 @@ class SemanticSegmentationBackend(Backend):
         pop, log = algorithms.eaMuPlusLambda(
             pop,
             self._toolbox,
-            self.train_opts.pop_size,  # TODO: Add parameter for generation size
-            self.train_opts.pop_size,  # TODO: Add parameter for new individual count (I think?)
-            0.5,  # TODO: Add parameter for mutation rate (?)
-            0.4,  # TODO: Add param for crossover rate (?)
+            self.train_opts.num_individuals,
+            self.train_opts.num_offspring,
+            self.train_opts.crossover_rate,
+            self.train_opts.mutation_rate,
             self.train_opts.num_generations,
-            stats=mstats,  # TODO: Make sure the non-debug case works
+            stats=mstats,
             halloffame=hof,
             verbose=self.train_opts.debug
         )
@@ -439,10 +320,9 @@ class SemanticSegmentationBackend(Backend):
         # to trigger done-ness.
         # Since model is exported every epoch, we need some other way to
         # show that training is finished.
-        # TODO: I'm doing both but I'd rather not used train_done_uri if I don't have to.
-        print(str(hof[0]))
+        if self.train_opts.debug:
+            print(str(hof[0]))
         str_to_file(str(hof[0]), self.backend_opts.train_done_uri)
-        str_to_file(str(hof[0]), self.backend_opts.model_uri)
 
         # Sync output to cloud.
         sync_to_dir(train_dir, self.backend_opts.train_uri)
@@ -490,7 +370,6 @@ class SemanticSegmentationBackend(Backend):
         # (and it should happen in the training too, in the same way).
         self.load_model(tmp_dir)
         func_chips = [np.transpose(chip, (2, 0, 1)) for chip in chips]
-        print('SHAPE OF CHIPS IS:', func_chips[0].shape)
         # The expected output shape is only one band with the same length and width dimensions
         label_arr = apply_to_raster(
             self.raster_func,
